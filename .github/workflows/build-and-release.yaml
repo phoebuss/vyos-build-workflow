@@ -1,0 +1,42 @@
+name: VyOS build workflow
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: setup env variables
+        run: |
+          cat ${GITHUB_WORKSPACE}/vyos.cfg |sed 's/#.*//g' |sed 's/^/VYOS_/g' >> $GITHUB_ENV
+          echo "BUILD_TIME=`date +%Y%m%d%H%M`" >> $GITHUB_ENV
+
+      - name: setup version
+        run: |
+          [ x${{env.VYOS_VERSION}} != x ] || echo "VYOS_VERSION=${{env.BUILD_TIME}}" >> $GITHUB_ENV
+
+      - name: checkout vyos code
+        run: |
+          url="https://github.com/vyos/vyos-build"
+          branch=${{env.VYOS_CODENAME}}
+          git clone --single-branch -b $branch $url
+
+      - name: setup build container
+        run: docker pull vyos/vyos-build:${{env.VYOS_CODENAME}}
+
+      - name: make iso
+        run: |
+          [ x${{env.VYOS_ARCH}} != x ] && arch=${{env.VYOS_ARCH}} || arch=amd64
+          cd vyos-build
+          docker run --rm --privileged -v $(pwd):/vyos -w /vyos vyos/vyos-build:${{env.VYOS_CODENAME}} bash -c "./configure --architecture $arch --build-by ${{env.VYOS_BUILD_BY}} --build-type release --version ${{env.VYOS_CODENAME}}-${{env.VYOS_VERSION}}; sudo make iso"
+
+      - name: publish
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{env.VYOS_CODENAME}}-${{env.VYOS_VERSION}}
+          token: ${{secrets.MYTOKEN}}
+          files: vyos-build/build/vyos-*.iso
